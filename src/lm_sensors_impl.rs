@@ -112,13 +112,13 @@ impl SensorsImpl {
                     continue;
                 };
 
-                let sensor_name = format!(
+                let sensor_id = format!(
                     "{}_{}",
                     chip.name()?,
                     feature.label().unwrap_or("unknown".to_string())
                 );
                 // replace all spaces with dashes
-                let sensor_name = sensor_name.replace(" ", "-");
+                let sensor_id = sensor_id.replace(" ", "-");
 
                 match feature_kind {
                     Kind::Voltage => {
@@ -127,7 +127,7 @@ impl SensorsImpl {
                                 "sensor",
                                 Some("voltage"),
                                 Some("measurement"),
-                                &sensor_name,
+                                &sensor_id,
                                 Some("V"),
                                 Some("mdi:flash"),
                             )
@@ -140,7 +140,7 @@ impl SensorsImpl {
                                 "sensor",
                                 Some("fan"),
                                 Some("measurement"),
-                                &sensor_name,
+                                &sensor_id,
                                 Some("RPM"),
                                 Some("mdi:fan"),
                             )
@@ -153,7 +153,7 @@ impl SensorsImpl {
                                 "sensor",
                                 Some("temperature"),
                                 Some("measurement"),
-                                &sensor_name,
+                                &sensor_id,
                                 Some("°C"),
                                 Some("mdi:thermometer"),
                             )
@@ -166,7 +166,7 @@ impl SensorsImpl {
                                 "sensor",
                                 Some("power"),
                                 Some("measurement"),
-                                &sensor_name,
+                                &sensor_id,
                                 Some("W"),
                                 Some("mdi:flash"),
                             )
@@ -179,7 +179,7 @@ impl SensorsImpl {
                                 "sensor",
                                 Some("energy"),
                                 Some("measurement"),
-                                &sensor_name,
+                                &sensor_id,
                                 Some("kWh"),
                                 Some("mdi:flash"),
                             )
@@ -192,7 +192,7 @@ impl SensorsImpl {
                                 "sensor",
                                 Some("current"),
                                 Some("measurement"),
-                                &sensor_name,
+                                &sensor_id,
                                 Some("A"),
                                 Some("mdi:flash"),
                             )
@@ -205,7 +205,7 @@ impl SensorsImpl {
                                 "sensor",
                                 Some("humidity"),
                                 Some("measurement"),
-                                &sensor_name,
+                                &sensor_id,
                                 Some("%"),
                                 Some("mdi:water-percent"),
                             )
