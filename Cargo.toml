@@ -25,6 +25,7 @@ tokio = { version = "1", features = ["full"] }
 url = { version = "2.2", features = ["serde"] }
 users = "0.11.0"
 simple_logger = "4.0.0"
+lm-sensors = "0.3.2"
 
 [package.metadata.deb]
 systemd-units = { unit-name = "system-mqtt", unit-scripts = "systemd", enable = true }

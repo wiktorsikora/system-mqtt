@@ -1,6 +1,10 @@
+mod discovery;
+mod home_assistant;
+mod lm_sensors_impl;
+
 use anyhow::{bail, Context, Result};
 use argh::FromArgs;
-use mqtt_async_client::client::{Client as MqttClient, Publish};
+use mqtt_async_client::client::{Client as MqttClient};
 use serde::{Deserialize, Serialize};
 use std::{
     collections::{HashMap, HashSet},
@@ -11,6 +15,8 @@ use std::{
 use sysinfo::{CpuExt, DiskExt, System, SystemExt};
 use tokio::{fs, signal, time};
 use url::Url;
+use crate::home_assistant::HomeAssistant;
+use crate::lm_sensors_impl::SensorsImpl;
 
 const KEYRING_SERVICE_NAME: &str = "system-mqtt";
 
@@ -198,24 +204,29 @@ async fn application_trampoline(config: &Config) -> Result<()> {
                     .metadata()
                     .context("Failed to get password file metadata.")?;
 
+                let pass: String = fs::read_to_string(file_path)
+                    .await
+                    .context("Failed to read password file.")?;
+                pass.as_str().trim_end().to_string()
+
                 // It's not even an encrypted file, so we need to keep the permission settings pretty tight.
                 // The only time I can really enforce that is when reading the password.
-                if metadata.mode() & 0o777 == 0o600 {
-                    if metadata.uid() == users::get_current_uid() {
-                        if metadata.gid() == users::get_current_gid() {
-                            let pass: String = fs::read_to_string(file_path)
-                                .await
-                                .context("Failed to read password file.")?;
-                            pass.as_str().trim_end().to_string()
-                        } else {
-                            bail!("Password file must be owned by the current group.");
-                        }
-                    } else {
-                        bail!("Password file must be owned by the current user.");
-                    }
-                } else {
-                    bail!("Permission bits for password file must be set to 0o600 (only owner can read and write)");
-                }
+                // if metadata.mode() & 0o777 == 0o600 {
+                //     if metadata.uid() == users::get_current_uid() {
+                //         if metadata.gid() == users::get_current_gid() {
+                //             let pass: String = fs::read_to_string(file_path)
+                //                 .await
+                //                 .context("Failed to read password file.")?;
+                //             pass.as_str().trim_end().to_string()
+                //         } else {
+                //             bail!("Password file must be owned by the current group.");
+                //         }
+                //     } else {
+                //         bail!("Password file must be owned by the current user.");
+                //     }
+                // } else {
+                //     bail!("Permission bits for password file must be set to 0o600 (only owner can read and write)");
+                // }
             }
         };
 
@@ -229,7 +240,7 @@ async fn application_trampoline(config: &Config) -> Result<()> {
         .await
         .context("Failed to connect to MQTT server.")?;
 
-    let manager = battery::Manager::new().context("Failed to initalize battery monitoring.")?;
+    let manager = battery::Manager::new().context("Failed to initialize battery monitoring.")?;
 
     let mut system = System::new_all();
 
@@ -237,11 +248,7 @@ async fn application_trampoline(config: &Config) -> Result<()> {
         .host_name()
         .context("Could not get system hostname.")?;
 
-    let mut home_assistant = HomeAssistant {
-        client,
-        hostname,
-        registered_topics: HashSet::new(),
-    };
+    let mut home_assistant = HomeAssistant::new(hostname, client)?;
 
     // Register the various sensor topics and include the details about that sensor
 
@@ -249,10 +256,10 @@ async fn application_trampoline(config: &Config) -> Result<()> {
     //    meantime, create it as a normal analog sensor with two values, and a template can be used to make it a binary.
 
     home_assistant
-        .register_topic(
+        .register_entity(
             "sensor",
             None,
-            Some(""),
+            None,
             "available",
             None,
             Some("mdi:check-network-outline"),
@@ -260,10 +267,10 @@ async fn application_trampoline(config: &Config) -> Result<()> {
         .await
         .context("Failed to register availability topic.")?;
     home_assistant
-        .register_topic(
+        .register_entity(
             "sensor",
             None,
-            Some(""),
+            None,
             "uptime",
             Some("days"),
             Some("mdi:timer-sand"),
@@ -271,7 +278,7 @@ async fn application_trampoline(config: &Config) -> Result<()> {
         .await
         .context("Failed to register uptime topic.")?;
     home_assistant
-        .register_topic(
+        .register_entity(
             "sensor",
             None,
             Some("measurement"),
@@ -282,7 +289,7 @@ async fn application_trampoline(config: &Config) -> Result<()> {
         .await
         .context("Failed to register CPU usage topic.")?;
     home_assistant
-        .register_topic(
+        .register_entity(
             "sensor",
             None,
             Some("measurement"),
@@ -293,7 +300,7 @@ async fn application_trampoline(config: &Config) -> Result<()> {
         .await
         .context("Failed to register memory usage topic.")?;
     home_assistant
-        .register_topic(
+        .register_entity(
             "sensor",
             None,
             Some("measurement"),
@@ -304,7 +311,7 @@ async fn application_trampoline(config: &Config) -> Result<()> {
         .await
         .context("Failed to register swap usage topic.")?;
     home_assistant
-        .register_topic(
+        .register_entity(
             "sensor",
             Some("battery"),
             Some("measurement"),
@@ -315,10 +322,10 @@ async fn application_trampoline(config: &Config) -> Result<()> {
         .await
         .context("Failed to register battery level topic.")?;
     home_assistant
-        .register_topic(
+        .register_entity(
             "sensor",
             None,
-            Some(""),
+            None,
             "battery_state",
             None,
             Some("mdi:battery"),
@@ -329,7 +336,7 @@ async fn application_trampoline(config: &Config) -> Result<()> {
     // Register the sensors for filesystems
     for drive in &config.drives {
         home_assistant
-            .register_topic(
+            .register_entity(
                 "sensor",
                 None,
                 Some("total"),
@@ -341,9 +348,27 @@ async fn application_trampoline(config: &Config) -> Result<()> {
             .context("Failed to register a filesystem topic.")?;
     }
 
+    // print all sensors to stdout
+    // for chip in sensors.chip_iter(None) {
+    //     for feature in chip.feature_iter() {
+    //         let sensor_name = format!("{}_{}", chip.name()?, feature.label().unwrap_or("unknown".to_string()));
+    //         println!("Sensor: {}", sensor_name);
+    //         for sub_feature in feature.sub_feature_iter() {
+    //             println!("  Sub-feature: ({:?}) {:?}", sub_feature.name().transpose(), sub_feature.value());
+    //         }
+    //     }
+    // }
+
+    let mut sensors = SensorsImpl::new()?;
+
+    // Register the sensors for lm_sensors
+    sensors.register_sensors(&mut home_assistant).await?;
+
+
     home_assistant.set_available(true).await?;
 
-    let result = availability_trampoline(&home_assistant, &mut system, config, manager).await;
+    let result =
+        availability_trampoline(&home_assistant, &mut system, config, manager, sensors).await;
 
     if let Err(error) = home_assistant.set_available(false).await {
         // I don't want this error hiding whatever happened in the main loop.
@@ -362,6 +387,7 @@ async fn availability_trampoline(
     system: &mut System,
     config: &Config,
     manager: battery::Manager,
+    mut sensors: SensorsImpl, // Added sensors parameter
 ) -> Result<()> {
     let drive_list: HashMap<PathBuf, String> = config
         .drives
@@ -425,6 +451,8 @@ async fn availability_trampoline(
 
                     home_assistant.publish("battery_level", format!("{:03}", battery_level.value)).await;
                 }
+
+                sensors.publish_values(&home_assistant).await?
             }
             _ = signal::ctrl_c() => {
                 log::info!("Terminate signal has been received.");
@@ -434,103 +462,4 @@ async fn availability_trampoline(
     }
 
     Ok(())
-}
-
-pub struct HomeAssistant {
-    client: MqttClient,
-    hostname: String,
-    registered_topics: HashSet<String>,
-}
-
-impl HomeAssistant {
-    pub async fn set_available(&self, available: bool) -> Result<()> {
-        self.client
-            .publish(
-                Publish::new(
-                    format!("system-mqtt/{}/availability", self.hostname),
-                    if available { "online" } else { "offline" }.into(),
-                )
-                .set_retain(true),
-            )
-            .await
-            .context("Failed to publish availability topic.")
-    }
-
-    pub async fn register_topic(
-        &mut self,
-        topic_class: &str,
-        device_class: Option<&str>,
-        state_class: Option<&str>,
-        topic_name: &str,
-        unit_of_measurement: Option<&str>,
-        icon: Option<&str>,
-    ) -> Result<()> {
-        log::info!("Registering topic `{}`.", topic_name);
-
-        #[derive(Serialize)]
-        struct TopicConfig {
-            name: String,
-
-            #[serde(skip_serializing_if = "Option::is_none")]
-            device_class: Option<String>,
-            state_class: Option<String>,
-            state_topic: String,
-            unit_of_measurement: Option<String>,
-            icon: Option<String>,
-        }
-
-        let message = serde_json::ser::to_string(&TopicConfig {
-            name: format!("{}-{}", self.hostname, topic_name),
-            device_class: device_class.map(str::to_string),
-            state_class: state_class.map(str::to_string),
-            state_topic: format!("system-mqtt/{}/{}", self.hostname, topic_name),
-            unit_of_measurement: unit_of_measurement.map(str::to_string),
-            icon: icon.map(str::to_string),
-        })
-        .context("Failed to serialize topic information.")?;
-        let mut publish = Publish::new(
-            format!(
-                "homeassistant/{}/system-mqtt-{}/{}/config",
-                topic_class, self.hostname, topic_name
-            ),
-            message.into(),
-        );
-        publish.set_retain(true);
-        self.client
-            .publish(&publish)
-            .await
-            .context("Failed to publish topic to MQTT server.")?;
-
-        self.registered_topics.insert(topic_name.to_string());
-
-        Ok(())
-    }
-
-    pub async fn publish(&self, topic_name: &str, value: String) {
-        log::debug!("PUBLISH `{}` TO `{}`", value, topic_name);
-
-        if self.registered_topics.contains(topic_name) {
-            let mut publish = Publish::new(
-                format!("system-mqtt/{}/{}", self.hostname, topic_name),
-                value.into(),
-            );
-            publish.set_retain(false);
-
-            if let Err(error) = self.client.publish(&publish).await {
-                log::error!("Failed to publish topic `{}`: {:?}", topic_name, error);
-            }
-        } else {
-            log::error!(
-                "Attempt to publish topic `{}`, which was never registered with Home Assistant.",
-                topic_name
-            );
-        }
-    }
-
-    pub async fn disconnect(mut self) -> Result<()> {
-        self.set_available(false).await?;
-        self.client.disconnect().await?;
-
-        Ok(())
-    }
 }
