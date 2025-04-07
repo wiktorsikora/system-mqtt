@@ -1,6 +1,7 @@
 mod discovery;
 mod home_assistant;
 mod lm_sensors_impl;
+mod config;
 
 use anyhow::{bail, Context, Result};
 use argh::FromArgs;
@@ -15,6 +16,7 @@ use std::{
 use sysinfo::{CpuExt, DiskExt, System, SystemExt};
 use tokio::{fs, signal, time};
 use url::Url;
+use crate::config::{load_config, Config, PasswordSource};
 use crate::home_assistant::HomeAssistant;
 use crate::lm_sensors_impl::SensorsImpl;
 
@@ -52,64 +54,6 @@ struct RunArguments {
 #[argh(subcommand, name = "set-password")]
 struct SetPasswordArguments {}
 
-#[derive(Serialize, Deserialize)]
-struct DriveConfig {
-    path: PathBuf,
-    name: String,
-}
-
-#[derive(Serialize, Deserialize)]
-enum PasswordSource {
-    #[serde(rename = "keyring")]
-    Keyring,
-
-    #[serde(rename = "secret_file")]
-    SecretFile(PathBuf),
-}
-
-impl Default for PasswordSource {
-    fn default() -> Self {
-        Self::Keyring
-    }
-}
-
-#[derive(Serialize, Deserialize)]
-struct Config {
-    /// The URL of the mqtt server.
-    mqtt_server: Url,
-
-    /// Set the username to connect to the mqtt server, if required.
-    /// The password will be fetched from the OS keyring.
-    username: Option<String>,
-
-    /// Where the password for the MQTT server can be found.
-    /// If a username is not specified, this field is ignored.
-    /// If not specified, this field defaults to the keyring.
-    #[serde(default)]
-    password_source: PasswordSource,
-
-    /// The interval to update at.
-    update_interval: Duration,
-
-    /// The names of drives, or the paths to where they are mounted.
-    drives: Vec<DriveConfig>,
-}
-
-impl Default for Config {
-    fn default() -> Self {
-        Self {
-            mqtt_server: Url::parse("mqtt://localhost").expect("Failed to parse default URL."),
-            username: None,
-            password_source: PasswordSource::Keyring,
-            update_interval: Duration::from_secs(30),
-            drives: vec![DriveConfig {
-                path: PathBuf::from("/"),
-                name: String::from("root"),
-            }],
-        }
-    }
-}
-
 #[tokio::main]
 async fn main() {
     let arguments: Arguments = argh::from_env();
@@ -144,25 +88,6 @@ async fn main() {
     }
 }
 
-async fn load_config(path: &Path) -> Result<Config> {
-    if path.is_file() {
-        // It's a readable file we can load.
-
-        let config: Config = serde_yaml::from_str(&fs::read_to_string(path).await?)
-            .context("Failed to deserialize config file.")?;
-
-        Ok(config)
-    } else {
-        log::info!("No config file present. A default one will be written.");
-        // Doesn't exist yet. We'll create it.
-        let config = Config::default();
-
-        // Write it to a file for next time we load.
-        fs::write(path, serde_yaml::to_string(&config)?).await?;
-
-        Ok(config)
-    }
-}
 
 async fn set_password(config: Config) -> Result<()> {
     if let Some(username) = config.username {
@@ -347,17 +272,6 @@ async fn application_trampoline(config: &Config) -> Result<()> {
             .await
             .context("Failed to register a filesystem topic.")?;
     }
-
-    // print all sensors to stdout
-    // for chip in sensors.chip_iter(None) {
-    //     for feature in chip.feature_iter() {
-    //         let sensor_name = format!("{}_{}", chip.name()?, feature.label().unwrap_or("unknown".to_string()));
-    //         println!("Sensor: {}", sensor_name);
-    //         for sub_feature in feature.sub_feature_iter() {
-    //             println!("  Sub-feature: ({:?}) {:?}", sub_feature.name().transpose(), sub_feature.value());
-    //         }
-    //     }
-    // }
 
     let mut sensors = SensorsImpl::new()?;
 
