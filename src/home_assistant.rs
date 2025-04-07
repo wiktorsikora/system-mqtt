@@ -6,15 +6,15 @@ use crate::discovery::{Device, DiscoveryPayload};
 
 pub struct HomeAssistant {
     client: MqttClient,
-    hostname: String,
+    device_id: String,
     registered_topics: HashSet<String>,
 }
 
 impl HomeAssistant {
-    pub fn new(hostname: String, client: MqttClient) -> anyhow::Result<Self> {
+    pub fn new(device_id: String, client: MqttClient) -> anyhow::Result<Self> {
         let home_assistant = Self {
             client,
-            hostname,
+            device_id,
             registered_topics: HashSet::new(),
         };
 
@@ -24,7 +24,7 @@ impl HomeAssistant {
         self.client
             .publish(
                 Publish::new(
-                    format!("system-mqtt/{}/availability", self.hostname),
+                    format!("system-mqtt/{}/availability", self.device_id),
                     if available { "online" } else { "offline" }.into(),
                 )
                     .set_retain(true),
@@ -45,15 +45,15 @@ impl HomeAssistant {
         log::info!("Registering entity `{}`.", entity_id);
 
         let message = serde_json::ser::to_string(&DiscoveryPayload {
-            unique_id: format!("{}-{}", self.hostname, entity_id),
+            unique_id: format!("{}-{}", self.device_id, entity_id),
             device: Device {
-                identifiers: vec![self.hostname.clone()],
-                name: self.hostname.clone(),
+                identifiers: vec![self.device_id.clone()],
+                name: self.device_id.clone(),
             },
-            name: format!("{}-{}", self.hostname, entity_id),
+            name: format!("{}-{}", self.device_id, entity_id),
             device_class: device_class.map(str::to_string),
             state_class: state_class.map(str::to_string),
-            state_topic: format!("system-mqtt/{}/{}", self.hostname, entity_id),
+            state_topic: format!("system-mqtt/{}/{}", self.device_id, entity_id),
             unit_of_measurement: unit_of_measurement.map(str::to_string),
             icon: icon.map(str::to_string),
         })
@@ -61,7 +61,7 @@ impl HomeAssistant {
         let mut publish = Publish::new(
             format!(
                 "homeassistant/{}/system-mqtt-{}/{}/config",
-                topic_class, self.hostname, entity_id
+                topic_class, self.device_id, entity_id
             ),
             message.into(),
         );
@@ -81,7 +81,7 @@ impl HomeAssistant {
 
         if self.registered_topics.contains(topic_name) {
             let mut publish = Publish::new(
-                format!("system-mqtt/{}/{}", self.hostname, topic_name),
+                format!("system-mqtt/{}/{}", self.device_id, topic_name),
                 value.into(),
             );
             publish.set_retain(false);

@@ -173,7 +173,12 @@ async fn application_trampoline(config: &Config) -> Result<()> {
         .host_name()
         .context("Could not get system hostname.")?;
 
-    let mut home_assistant = HomeAssistant::new(hostname, client)?;
+    let device_id = config
+        .unique_id
+        .clone()
+        .unwrap_or_else(|| hostname);
+
+    let mut home_assistant = HomeAssistant::new(device_id, client)?;
 
     // Register the various sensor topics and include the details about that sensor
 

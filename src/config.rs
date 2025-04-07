@@ -27,6 +27,11 @@ pub async fn load_config(path: &Path) -> anyhow::Result<Config> {
 
 #[derive(Serialize, Deserialize)]
 pub struct Config {
+
+    /// The unique ID of the device.
+    /// If not specified, the hostname will be used.
+    pub unique_id: Option<String>,
+
     /// The URL of the mqtt server.
     pub mqtt_server: Url,
 
@@ -50,6 +55,7 @@ pub struct Config {
 impl Default for Config {
     fn default() -> Self {
         Self {
+            unique_id: None,
             mqtt_server: Url::parse("mqtt://localhost").expect("Failed to parse default URL."),
             username: None,
             password_source: PasswordSource::Keyring,
