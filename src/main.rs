@@ -13,8 +13,10 @@ use std::{
     path::{Path, PathBuf},
     time::Duration,
 };
+use serde_json::Value;
 use sysinfo::{CpuExt, DiskExt, System, SystemExt};
 use tokio::{fs, signal, time};
+use tokio::time::Instant;
 use url::Url;
 use crate::config::{load_config, Config, PasswordSource};
 use crate::home_assistant::HomeAssistant;
@@ -310,7 +312,7 @@ async fn availability_trampoline(
     system: &mut System,
     config: &Config,
     manager: battery::Manager,
-    mut sensors: SensorsImpl, // Added sensors parameter
+    mut sensors: SensorsImpl,
 ) -> Result<()> {
     let drive_list: HashMap<PathBuf, String> = config
         .drives
@@ -322,39 +324,46 @@ async fn availability_trampoline(
     system.refresh_memory();
     system.refresh_cpu();
 
+    let mut discovery_interval = tokio::time::interval_at(Instant::now(), config.discovery_interval.unwrap_or(Duration::from_secs(60 * 60)));
+    let mut interval = tokio::time::interval_at(Instant::now(), config.update_interval);
+
     loop {
         tokio::select! {
-            _ = time::sleep(config.update_interval) => {
+            _ = discovery_interval.tick() => {
+                home_assistant.publish_discovery().await?
+            }
+            _ = interval.tick() => {
                 system.refresh_disks();
                 system.refresh_memory();
                 system.refresh_cpu();
 
-                // Report uptime.
+                let mut stats = HashMap::new();
+
+                // Collect uptime.
                 let uptime = system.uptime() as f32 / 60.0 / 60.0 / 24.0; // Convert from seconds to days.
-                home_assistant.publish("uptime", format!("{}", uptime)).await;
+                stats.insert("uptime".to_string(), Value::from(uptime));
 
-                // Report CPU usage.
+                // Collect CPU usage.
                 let cpu_usage = (system.cpus().iter().map(|cpu| cpu.cpu_usage()).sum::<f32>()) / (system.cpus().len() as f32 * 100.0);
-                home_assistant.publish("cpu", (cpu_usage * 100.0).to_string()).await;
+                stats.insert("cpu".to_string(), Value::from(cpu_usage * 100.0));
 
-                // Report memory usage.
+                // Collect memory usage.
                 let memory_percentile = (system.total_memory() - system.available_memory()) as f64 / system.total_memory() as f64;
-                home_assistant.publish("memory", (memory_percentile.clamp(0.0, 1.0)* 100.0).to_string()).await;
+                stats.insert("memory".to_string(), Value::from(memory_percentile.clamp(0.0, 1.0) * 100.0));
 
-                // Report swap usage.
+                // Collect swap usage.
                 let swap_percentile = system.used_swap() as f64 / system.free_swap() as f64;
-                home_assistant.publish("swap", (swap_percentile.clamp(0.0, 1.0) * 100.0).to_string()).await;
+                stats.insert("swap".to_string(), Value::from(swap_percentile.clamp(0.0, 1.0) * 100.0));
 
-                // Report filesystem usage.
+                // Collect filesystem usage.
                 for drive in system.disks() {
                     if let Some(drive_name) = drive_list.get(drive.mount_point()) {
                         let drive_percentile = (drive.total_space() - drive.available_space()) as f64 / drive.total_space() as f64;
-
-                        home_assistant.publish(drive_name, (drive_percentile.clamp(0.0, 1.0) * 100.0).to_string()).await;
+                        stats.insert(drive_name.clone(), Value::from(drive_percentile.clamp(0.0, 1.0) * 100.0));
                     }
                 }
 
-                // TODO we should probably combine the battery charges, but for now we're just going to use the first detected battery.
+                // Collect battery information.
                 if let Some(battery) = manager.batteries().context("Failed to read battery info.")?.flatten().next() {
                     use battery::State;
 
@@ -365,17 +374,21 @@ async fn availability_trampoline(
                         State::Full => "full",
                         _ => "unknown",
                     };
-
-                    home_assistant.publish("battery_state", battery_state.to_string()).await;
+                    stats.insert("battery_state".to_string(), Value::from(battery_state));
 
                     let battery_full = battery.energy_full();
                     let battery_power = battery.energy();
                     let battery_level = battery_power / battery_full;
 
-                    home_assistant.publish("battery_level", format!("{:03}", battery_level.value)).await;
+                    stats.insert("battery_level".to_string(), Value::from(battery_level.value));
                 }
 
-                sensors.publish_values(&home_assistant).await?
+                // Collect lm_sensors data.
+                sensors.collect_values(&mut stats).await?;
+
+                // Serialize stats to JSON and publish.
+                let json_message = serde_json::to_string(&stats).context("Failed to serialize stats to JSON.")?;
+                home_assistant.publish("state", json_message).await;
             }
             _ = signal::ctrl_c() => {
                 log::info!("Terminate signal has been received.");

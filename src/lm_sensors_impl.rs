@@ -1,3 +1,4 @@
+use std::collections::HashMap;
 use anyhow::Context;
 use lm_sensors::feature::Kind;
 use lm_sensors::{LMSensors, Value};
@@ -16,7 +17,7 @@ impl SensorsImpl {
         })
     }
 
-    pub async fn publish_values(&mut self, home_assistant: &HomeAssistant) -> anyhow::Result<()> {
+    pub async fn collect_values(&mut self, stats: &mut HashMap<String, serde_json::Value>) -> anyhow::Result<()> {
         for chip in self.sensors.chip_iter(None) {
             for feature in chip.feature_iter() {
                 let Some(feature_kind) = feature.kind() else {
@@ -24,7 +25,11 @@ impl SensorsImpl {
                     continue;
                 };
 
-                let sensor_name = format!("{}_{}", chip.name()?, feature.label().unwrap_or("unknown".to_string()));
+                let sensor_name = format!(
+                    "{}_{}",
+                    chip.name()?,
+                    feature.label().unwrap_or("unknown".to_string())
+                );
                 let sensor_name = sensor_name.replace(" ", "-");
 
                 for sub_feature in feature.sub_feature_iter() {
@@ -32,57 +37,45 @@ impl SensorsImpl {
 
                     match feature_kind {
                         Kind::Voltage => {
-                            if let Ok(Value::VoltageInput(voltage)) = val {
-                                home_assistant.publish(&sensor_name, format!("{:.2}", voltage)).await;
+                            if let Ok(Value::VoltageInput(v)) = val {
+                                stats.insert(sensor_name.clone(), serde_json::Value::from(v));
                             }
                         }
                         Kind::Temperature => {
-                            if let Ok(Value::TemperatureInput(temp)) = val {
-                                home_assistant.publish(&sensor_name, format!("{:.2}", temp)).await;
+                            if let Ok(Value::TemperatureInput(v)) = val {
+                                stats.insert(sensor_name.clone(), serde_json::Value::from(v));
                             }
                         }
                         Kind::Fan => {
-                            if let Ok(Value::FanInput(fan)) = val {
-                                home_assistant.publish(&sensor_name, format!("{:.2}", fan)).await;
+                            if let Ok(Value::FanInput(v)) = val {
+                                stats.insert(sensor_name.clone(), serde_json::Value::from(v));
                             }
                         }
                         Kind::Power => {
-                            if let Ok(Value::PowerInput(power)) = val {
-                                home_assistant.publish(&sensor_name, format!("{:.2}", power)).await;
+                            if let Ok(Value::PowerInput(v)) = val {
+                                stats.insert(sensor_name.clone(), serde_json::Value::from(v));
                             }
                         }
                         Kind::Energy => {
-                            if let Ok(Value::EnergyInput(energy)) = val {
-                                home_assistant.publish(&sensor_name, format!("{:.2}", energy)).await;
+                            if let Ok(Value::EnergyInput(v)) = val {
+                                stats.insert(sensor_name.clone(), serde_json::Value::from(v));
                             }
                         }
                         Kind::Current => {
-                            if let Ok(Value::CurrentInput(current)) = val {
-                                home_assistant.publish(&sensor_name, format!("{:.2}", current)).await;
+                            if let Ok(Value::CurrentInput(v)) = val {
+                                stats.insert(sensor_name.clone(), serde_json::Value::from(v));
                             }
                         }
                         Kind::Humidity => {
-                            if let Ok(Value::HumidityInput(humidity)) = val {
-                                home_assistant.publish(&sensor_name, format!("{:.2}", humidity)).await;
+                            if let Ok(Value::HumidityInput(v)) = val {
+                                stats.insert(sensor_name.clone(), serde_json::Value::from(v));
                             }
                         }
                         _ => {
                             log::warn!("Unknown feature kind: {:?}", feature_kind);
                         }
                     }
-
                 }
-                //
-                // if feature.kind() == Some(lm_sensors::feature::Kind::Temperature) {
-                //     let sensor_name = format!("{}_{}", chip.name()?, feature.label().unwrap_or("unknown".to_string()));
-                //     let sensor_name = sensor_name.replace(" ", "-");
-                //
-                //     for sub_feature in feature.sub_feature_iter() {
-                //         if let Ok(Value::TemperatureInput(temp)) = sub_feature.value() {
-                //             home_assistant.publish(&sensor_name, format!("{:.2}", temp)).await;
-                //         }
-                //     }
-                // }
             }
         }
         Ok(())

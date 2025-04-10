@@ -50,6 +50,11 @@ pub struct Config {
     /// The interval to update at.
     pub update_interval: Duration,
 
+    /// The interval to send discovery messages at.
+    #[serde(default)]
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub discovery_interval: Option<Duration>,
+
     /// The names of drives, or the paths to where they are mounted.
     pub drives: Vec<DriveConfig>,
 }
@@ -62,6 +67,7 @@ impl Default for Config {
             username: None,
             password_source: PasswordSource::Keyring,
             update_interval: Duration::from_secs(30),
+            discovery_interval: Some(Duration::from_secs(60 * 60)),
             drives: vec![DriveConfig {
                 path: PathBuf::from("/"),
                 name: String::from("root"),
