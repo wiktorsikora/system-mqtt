@@ -29,3 +29,4 @@ lm-sensors = "0.3.2"
 
 [package.metadata.deb]
 systemd-units = { unit-name = "system-mqtt", unit-scripts = "systemd", enable = true }
+depends = ["lm-sensors"]

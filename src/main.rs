@@ -153,6 +153,10 @@ async fn application_trampoline(config: &Config) -> Result<()> {
                 //     bail!("Permission bits for password file must be set to 0o600 (only owner can read and write)");
                 // }
             }
+            PasswordSource::Plaintext(passwd) => {
+                log::info!("Using plaintext password for MQTT password source.");
+                passwd.clone()
+            }
         };
 
         client_builder.set_username(Some(username.into()));

@@ -30,6 +30,8 @@ pub struct Config {
 
     /// The unique ID of the device.
     /// If not specified, the hostname will be used.
+    #[serde(default)]
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub unique_id: Option<String>,
 
     /// The URL of the mqtt server.
@@ -81,6 +83,9 @@ pub enum PasswordSource {
 
     #[serde(rename = "secret_file")]
     SecretFile(PathBuf),
+
+    #[serde(rename = "plaintext")]
+    Plaintext(String),
 }
 
 impl Default for PasswordSource {
