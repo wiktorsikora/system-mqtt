@@ -57,6 +57,12 @@ pub struct Config {
 
     /// The names of drives, or the paths to where they are mounted.
     pub drives: Vec<DriveConfig>,
+
+    /// The path to the CA certificate for the MQTT server.
+    /// This is only required if the server uses a self-signed certificate.
+    #[serde(default)]
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub ca_cert: Option<PathBuf>,
 }
 
 impl Default for Config {
@@ -72,6 +78,7 @@ impl Default for Config {
                 path: PathBuf::from("/"),
                 name: String::from("root"),
             }],
+            ca_cert: None,
         }
     }
 }

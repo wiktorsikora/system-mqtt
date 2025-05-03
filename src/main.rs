@@ -5,19 +5,18 @@ mod config;
 
 use anyhow::{bail, Context, Result};
 use argh::FromArgs;
-use mqtt_async_client::client::{Client as MqttClient};
-use serde::{Deserialize, Serialize};
+use rumqttc::{MqttOptions, Transport, AsyncClient, ConnectionError};
 use std::{
-    collections::{HashMap, HashSet},
-    os::unix::prelude::MetadataExt,
-    path::{Path, PathBuf},
+    collections::{HashMap},
+    path::{PathBuf},
     time::Duration,
 };
+use std::convert::TryFrom;
 use serde_json::Value;
 use sysinfo::{CpuExt, DiskExt, System, SystemExt};
 use tokio::{fs, signal, time};
+use tokio::task::JoinHandle;
 use tokio::time::Instant;
-use url::Url;
 use crate::config::{load_config, Config, PasswordSource};
 use crate::home_assistant::HomeAssistant;
 use crate::lm_sensors_impl::SensorsImpl;
@@ -72,10 +71,12 @@ async fn main() {
                     systemd_journal_logger::init().expect("Failed to setup log.");
                 }
 
-                log::set_max_level(log::LevelFilter::Info);
+                // log::set_max_level(log::LevelFilter::Info);
 
                 while let Err(error) = application_trampoline(&config).await {
-                    log::error!("Fatal error: {}", error);
+                    log::error!("Fatal error: {error:#}");
+                    log::error!("Restarting in 5 seconds...");
+                    time::sleep(Duration::from_secs(5)).await;
                 }
             }
             SubCommand::SetPassword(_arguments) => {
@@ -89,7 +90,6 @@ async fn main() {
         }
     }
 }
-
 
 async fn set_password(config: Config) -> Result<()> {
     if let Some(username) = config.username {
@@ -109,70 +109,6 @@ async fn set_password(config: Config) -> Result<()> {
 async fn application_trampoline(config: &Config) -> Result<()> {
     log::info!("Application start.");
 
-    let mut client_builder = MqttClient::builder();
-    client_builder.set_url_string(config.mqtt_server.as_str())?;
-
-    // If credentials are provided, use them.
-    if let Some(username) = &config.username {
-        // TODO make TLS mandatory when using a password.
-
-        let password = match &config.password_source {
-            PasswordSource::Keyring => {
-                log::info!("Using system keyring for MQTT password source.");
-                let keyring = keyring::Entry::new(KEYRING_SERVICE_NAME, username)
-                    .context("Failed to find password entry in keyring.")?;
-                keyring
-                    .get_password()
-                    .context("Failed to get password from keyring. If you have not yet set the password, run `system-mqtt set-password`.")?
-            }
-            PasswordSource::SecretFile(file_path) => {
-                log::info!("Using hidden file for MQTT password source.");
-                let metadata = file_path
-                    .metadata()
-                    .context("Failed to get password file metadata.")?;
-
-                let pass: String = fs::read_to_string(file_path)
-                    .await
-                    .context("Failed to read password file.")?;
-                pass.as_str().trim_end().to_string()
-
-                // It's not even an encrypted file, so we need to keep the permission settings pretty tight.
-                // The only time I can really enforce that is when reading the password.
-                // if metadata.mode() & 0o777 == 0o600 {
-                //     if metadata.uid() == users::get_current_uid() {
-                //         if metadata.gid() == users::get_current_gid() {
-                //             let pass: String = fs::read_to_string(file_path)
-                //                 .await
-                //                 .context("Failed to read password file.")?;
-                //             pass.as_str().trim_end().to_string()
-                //         } else {
-                //             bail!("Password file must be owned by the current group.");
-                //         }
-                //     } else {
-                //         bail!("Password file must be owned by the current user.");
-                //     }
-                // } else {
-                //     bail!("Permission bits for password file must be set to 0o600 (only owner can read and write)");
-                // }
-            }
-            PasswordSource::Plaintext(passwd) => {
-                log::info!("Using plaintext password for MQTT password source.");
-                passwd.clone()
-            }
-        };
-
-        client_builder.set_username(Some(username.into()));
-        client_builder.set_password(Some(password.as_bytes().to_vec()));
-    }
-
-    let mut client = client_builder.build()?;
-    client
-        .connect()
-        .await
-        .context("Failed to connect to MQTT server.")?;
-
-    let manager = battery::Manager::new().context("Failed to initialize battery monitoring.")?;
-
     let mut system = System::new_all();
 
     let hostname = system
@@ -184,13 +120,63 @@ async fn application_trampoline(config: &Config) -> Result<()> {
         .clone()
         .unwrap_or_else(|| hostname);
 
+    let mut url = config
+        .mqtt_server
+        .clone();
+    let client_id = format!("system-mqtt-{}", device_id);
+
+    // add client id to the URL
+    url.query_pairs_mut()
+        .append_pair("client_id", &client_id);
+
+    // eprintln!("url = {:#?}", url);
+
+    let mut mqtt_options = MqttOptions::try_from(url)
+        .context("failed to create MQTT options")?;
+
+    // eprintln!("mqtt_options = {:#?}", mqtt_options);
+
+    if let Some(ca_cert) = &config.ca_cert {
+        let ca_cert = fs::read(ca_cert)
+            .await
+            .context("Failed to read CA certificate.")?;
+        let transport = Transport::tls(ca_cert, None, None);
+        mqtt_options.set_transport(transport);
+    };
+
+    // Set credentials if provided
+    if let Some(username) = &config.username {
+        let password = match &config.password_source {
+            PasswordSource::Keyring => {
+                log::info!("Using system keyring for MQTT password source.");
+                let keyring = keyring::Entry::new(KEYRING_SERVICE_NAME, username)
+                    .context("Failed to find password entry in keyring.")?;
+                keyring
+                    .get_password()
+                    .context("Failed to get password from keyring. If you have not yet set the password, run `system-mqtt set-password`.")?
+            }
+            PasswordSource::SecretFile(file_path) => {
+                log::info!("Using hidden file for MQTT password source.");
+                let pass: String = fs::read_to_string(file_path)
+                    .await
+                    .context("Failed to read password file.")?;
+                pass.trim_end().to_string()
+            }
+            PasswordSource::Plaintext(passwd) => {
+                log::info!("Using plaintext password for MQTT password source.");
+                passwd.clone()
+            }
+        };
+
+        mqtt_options.set_credentials(username.clone(), password);
+    }
+
+    let (client, eventloop) = AsyncClient::new(mqtt_options, 10);
+    let manager = battery::Manager::new().context("Failed to initialize battery monitoring.")?;
+
     let mut home_assistant = HomeAssistant::new(device_id, client)?;
 
     // Register the various sensor topics and include the details about that sensor
-
-    //    TODO - create a new register_topic to register binary_sensor so we can make availability a real binary sensor. In the
-    //    meantime, create it as a normal analog sensor with two values, and a template can be used to make it a binary.
-
     home_assistant
         .register_entity(
             "sensor",
@@ -285,19 +271,17 @@ async fn application_trampoline(config: &Config) -> Result<()> {
     }
 
     let mut sensors = SensorsImpl::new()?;
-
-    // Register the sensors for lm_sensors
     sensors.register_sensors(&mut home_assistant).await?;
-
 
     home_assistant.set_available(true).await?;
 
+    let mqtt_task = mqtt_loop(eventloop).await;
+
     let result =
-        availability_trampoline(&home_assistant, &mut system, config, manager, sensors).await;
+        availability_trampoline(mqtt_task, &home_assistant, &mut system, config, manager, sensors).await;
 
     if let Err(error) = home_assistant.set_available(false).await {
-        // I don't want this error hiding whatever happened in the main loop.
-        log::error!("Error while disconnecting from home assistant: {:?}", error);
+        log::error!("Error while disconnecting from home assistant: {:#}", error);
     }
 
     result?;
@@ -307,7 +291,24 @@ async fn application_trampoline(config: &Config) -> Result<()> {
     Ok(())
 }
 
+async fn mqtt_loop(
+    mut eventloop: rumqttc::EventLoop
+) -> JoinHandle<std::result::Result<(), ConnectionError>> {
+    tokio::spawn(async move {
+        loop {
+            match eventloop.poll().await {
+                Ok(_) => {}
+                Err(e) => {
+                    log::error!("Error in MQTT loop: {:#}", e);
+                    break Err(e);
+                }
+            }
+        }
+    })
+}
+
 async fn availability_trampoline(
+    mut mqtt_task: JoinHandle<std::result::Result<(), ConnectionError>>,
     home_assistant: &HomeAssistant,
     system: &mut System,
     config: &Config,
@@ -327,8 +328,28 @@ async fn availability_trampoline(
     let mut discovery_interval = tokio::time::interval_at(Instant::now(), config.discovery_interval.unwrap_or(Duration::from_secs(60 * 60)));
     let mut interval = tokio::time::interval_at(Instant::now(), config.update_interval);
 
+    // create fused mqtt_task
+    use futures_util::future::FutureExt;
+    let mut mqtt_fut = mqtt_task.fuse();
+
     loop {
         tokio::select! {
+            result = &mut mqtt_fut => {
+                match result {
+                    Ok(Ok(_)) => {
+                        log::info!("MQTT task completed successfully, exiting.");
+                        break;
+                    }
+                    Ok(Err(e)) => {
+                        log::error!("MQTT task failed: {:#}", e);
+                        return Err(e).context("MQTT task failed.");
+                    }
+                    Err(e) => {
+                        log::error!("MQTT task failed: {:#}", e);
+                        return Err(e).context("MQTT task failed.");
+                    }
+                }
+            }
             _ = discovery_interval.tick() => {
                 home_assistant.publish_discovery().await?
             }

@@ -1,19 +1,17 @@
-use mqtt_async_client::client::{Client as MqttClient, Publish};
-
+use rumqttc::{AsyncClient, QoS};
 use std::collections::HashSet;
 use anyhow::Context;
 use crate::discovery::{Device, SingleComponentDiscoveryPayload};
 
-
 pub struct HomeAssistant {
-    client: MqttClient,
+    client: AsyncClient,
     device_id: String,
     registered_topics: HashSet<String>,
     discovery_info: Vec<(String, SingleComponentDiscoveryPayload)>
 }
 
 impl HomeAssistant {
-    pub fn new(device_id: String, client: MqttClient) -> anyhow::Result<Self> {
+    pub fn new(device_id: String, client: AsyncClient) -> anyhow::Result<Self> {
         let home_assistant = Self {
             client,
             device_id,
@@ -23,14 +21,15 @@ impl HomeAssistant {
 
         Ok(home_assistant)
     }
+
     pub async fn set_available(&self, available: bool) -> anyhow::Result<()> {
+        let payload = if available { "online" } else { "offline" };
         self.client
             .publish(
-                Publish::new(
-                    format!("system-mqtt/{}/availability", self.device_id),
-                    if available { "online" } else { "offline" }.into(),
-                )
-                    .set_retain(true),
+                format!("system-mqtt/{}/availability", self.device_id),
+                QoS::AtLeastOnce,
+                true,
+                payload,
             )
             .await
             .context("Failed to publish availability topic.")
@@ -76,13 +75,8 @@ impl HomeAssistant {
         for (topic, payload) in &self.discovery_info {
             let message = serde_json::ser::to_string(payload)
                 .context("Failed to serialize topic information.")?;
-            let publish = Publish::new(
-                topic.clone(),
-                message.into(),
-            );
-            // publish.set_retain(true);
             self.client
-                .publish(&publish)
+                .publish(topic.clone(), QoS::AtLeastOnce, true, message)
                 .await
                 .context("Failed to publish topic to MQTT server.")?;
         }
@@ -95,14 +89,8 @@ impl HomeAssistant {
 
         let topic = format!("system-mqtt/{}/{}", self.device_id, topic_name);
         if self.registered_topics.contains(&topic) {
-            let mut publish = Publish::new(
-                topic,
-                value.into(),
-            );
-            publish.set_retain(false);
-
-            if let Err(error) = self.client.publish(&publish).await {
-                log::error!("Failed to publish topic `{}`: {:?}", topic_name, error);
+            if let Err(error) = self.client.publish(topic, QoS::AtLeastOnce, false, value).await {
+                log::error!("Failed to publish topic `{}`: {:#}", topic_name, error);
             }
         } else {
             log::error!(
@@ -112,10 +100,8 @@ impl HomeAssistant {
         }
     }
 
-    pub async fn disconnect(mut self) -> anyhow::Result<()> {
+    pub async fn disconnect(self) -> anyhow::Result<()> {
         self.set_available(false).await?;
-        self.client.disconnect().await?;
-
         Ok(())
     }
 }
