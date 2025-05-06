@@ -17,6 +17,7 @@ use crate::system_sensors::{collect_system_stats, register_system_sensors};
 use anyhow::{Context, Result};
 use rumqttc::ConnectionError;
 use std::{collections::HashMap, path::PathBuf, time::Duration};
+use log::LevelFilter;
 use sysinfo::System;
 use systemd_journal_logger::JournalLog;
 use tokio::task::JoinHandle;
@@ -36,9 +37,10 @@ async fn main() {
                         .init()
                         .expect("Failed to setup log.");
                 } else {
-                    JournalLog::new().unwrap().install().unwrap();
+                    let log = JournalLog::new().unwrap();
+                    log.install().unwrap()
                 }
-
+                log::set_max_level(LevelFilter::Info);
                 while let Err(error) = application_trampoline(&config).await {
                     log::error!("Fatal error: {error:#}");
                     log::error!("Restarting in 60 seconds...");
