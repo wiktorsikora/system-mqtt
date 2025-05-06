@@ -2,7 +2,12 @@ use std::collections::HashMap;
 use anyhow::Context;
 use lm_sensors::feature::Kind;
 use lm_sensors::{LMSensors, Value};
-use crate::home_assistant::HomeAssistant;
+use crate::home_assistant::{HomeAssistant, EntityRegistrationBuilder};
+
+/// Sanitize a sensor name by replacing spaces with dashes
+fn sanitize_sensor_name(name: String) -> String {
+    name.replace(" ", "-")
+}
 
 pub struct SensorsImpl {
     pub sensors: LMSensors,
@@ -25,12 +30,11 @@ impl SensorsImpl {
                     continue;
                 };
 
-                let sensor_name = format!(
+                let sensor_name = sanitize_sensor_name(format!(
                     "{}_{}",
                     chip.name()?,
                     feature.label().unwrap_or("unknown".to_string())
-                );
-                let sensor_name = sensor_name.replace(" ", "-");
+                ));
 
                 for sub_feature in feature.sub_feature_iter() {
                     let val = sub_feature.value();
@@ -105,102 +109,93 @@ impl SensorsImpl {
                     continue;
                 };
 
-                let sensor_id = format!(
+                let sensor_id = sanitize_sensor_name(format!(
                     "{}_{}",
                     chip.name()?,
                     feature.label().unwrap_or("unknown".to_string())
-                );
-                // replace all spaces with dashes
-                let sensor_id = sensor_id.replace(" ", "-");
+                ));
 
                 match feature_kind {
                     Kind::Voltage => {
                         home_assistant
-                            .register_entity(
-                                "sensor",
-                                Some("voltage"),
-                                Some("measurement"),
-                                &sensor_id,
-                                Some("V"),
-                                Some("mdi:flash"),
+                            .register_entity_with_builder(
+                                EntityRegistrationBuilder::new("sensor", &sensor_id)
+                                    .device_class("voltage")
+                                    .state_class("measurement")
+                                    .unit_of_measurement("V")
+                                    .icon("mdi:flash")
                             )
                             .await
                             .context("Failed to register voltage sensor topic.")?;
                     }
                     Kind::Fan => {
                         home_assistant
-                            .register_entity(
-                                "sensor",
-                                Some("fan"),
-                                Some("measurement"),
-                                &sensor_id,
-                                Some("RPM"),
-                                Some("mdi:fan"),
+                            .register_entity_with_builder(
+                                EntityRegistrationBuilder::new("sensor", &sensor_id)
+                                    .device_class("fan")
+                                    .state_class("measurement")
+                                    .unit_of_measurement("RPM")
+                                    .icon("mdi:fan")
                             )
                             .await
                             .context("Failed to register fan sensor topic.")?;
                     }
                     Kind::Temperature => {
                         home_assistant
-                            .register_entity(
-                                "sensor",
-                                Some("temperature"),
-                                Some("measurement"),
-                                &sensor_id,
-                                Some("°C"),
-                                Some("mdi:thermometer"),
+                            .register_entity_with_builder(
+                                EntityRegistrationBuilder::new("sensor", &sensor_id)
+                                    .device_class("temperature")
+                                    .state_class("measurement")
+                                    .unit_of_measurement("°C")
+                                    .icon("mdi:thermometer")
                             )
                             .await
                             .context("Failed to register temperature sensor topic.")?;
                     }
                     Kind::Power => {
                         home_assistant
-                            .register_entity(
-                                "sensor",
-                                Some("power"),
-                                Some("measurement"),
-                                &sensor_id,
-                                Some("W"),
-                                Some("mdi:flash"),
+                            .register_entity_with_builder(
+                                EntityRegistrationBuilder::new("sensor", &sensor_id)
+                                    .device_class("power")
+                                    .state_class("measurement")
+                                    .unit_of_measurement("W")
+                                    .icon("mdi:flash")
                             )
                             .await
                             .context("Failed to register power sensor topic.")?;
                     }
                     Kind::Energy => {
                         home_assistant
-                            .register_entity(
-                                "sensor",
-                                Some("energy"),
-                                Some("measurement"),
-                                &sensor_id,
-                                Some("kWh"),
-                                Some("mdi:flash"),
+                            .register_entity_with_builder(
+                                EntityRegistrationBuilder::new("sensor", &sensor_id)
+                                    .device_class("energy")
+                                    .state_class("measurement")
+                                    .unit_of_measurement("kWh")
+                                    .icon("mdi:flash")
                             )
                             .await
                             .context("Failed to register energy sensor topic.")?;
                     }
                     Kind::Current => {
                         home_assistant
-                            .register_entity(
-                                "sensor",
-                                Some("current"),
-                                Some("measurement"),
-                                &sensor_id,
-                                Some("A"),
-                                Some("mdi:flash"),
+                            .register_entity_with_builder(
+                                EntityRegistrationBuilder::new("sensor", &sensor_id)
+                                    .device_class("current")
+                                    .state_class("measurement")
+                                    .unit_of_measurement("A")
+                                    .icon("mdi:flash")
                             )
                             .await
                             .context("Failed to register current sensor topic.")?;
                     }
                     Kind::Humidity => {
                         home_assistant
-                            .register_entity(
-                                "sensor",
-                                Some("humidity"),
-                                Some("measurement"),
-                                &sensor_id,
-                                Some("%"),
-                                Some("mdi:water-percent"),
+                            .register_entity_with_builder(
+                                EntityRegistrationBuilder::new("sensor", &sensor_id)
+                                    .device_class("humidity")
+                                    .state_class("measurement")
+                                    .unit_of_measurement("%")
+                                    .icon("mdi:water-percent")
                             )
                             .await
                             .context("Failed to register humidity sensor topic.")?;

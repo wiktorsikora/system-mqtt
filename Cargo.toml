@@ -2,7 +2,7 @@
 name = "system-mqtt"
 authors = ["James Carl"]
 version = "0.3.1"
-edition = "2018"
+edition = "2021"
 license = "MIT"
 readme = "README.md"
 description = "Broadcasts system statistics to an mqtt server of your choice. Ideal for home assistant!"
@@ -27,6 +27,7 @@ users = "0.11.0"
 simple_logger = "4.0.0"
 lm-sensors = "0.3.2"
 futures-util = "0.3.31"
+native-tls = "0.2.14"
 
 [package.metadata.deb]
 systemd-units = { unit-name = "system-mqtt", unit-scripts = "systemd", enable = true }

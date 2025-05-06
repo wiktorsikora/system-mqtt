@@ -67,9 +67,13 @@ pub struct Config {
 
 impl Default for Config {
     fn default() -> Self {
+        // This URL parsing should never fail as it's a hardcoded, valid URL
+        let mqtt_server = Url::parse("mqtt://localhost")
+            .unwrap_or_else(|_| panic!("Failed to parse default URL, this is a bug"));
+
         Self {
             unique_id: None,
-            mqtt_server: Url::parse("mqtt://localhost").expect("Failed to parse default URL."),
+            mqtt_server,
             username: None,
             password_source: PasswordSource::Keyring,
             update_interval: Duration::from_secs(30),
