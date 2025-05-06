@@ -2,7 +2,7 @@ use anyhow::{Context, Result};
 use serde_json::Value;
 use std::collections::HashMap;
 use std::path::PathBuf;
-use sysinfo::{CpuExt, DiskExt, System, SystemExt};
+use sysinfo::{System, Disks};
 use crate::config::Config;
 use crate::home_assistant::{EntityRegistrationBuilder, HomeAssistant};
 use crate::lm_sensors_impl::SensorsImpl;
@@ -94,14 +94,12 @@ pub async fn collect_system_stats(
     sensors: &mut SensorsImpl,
 ) -> Result<HashMap<String, Value>> {
     // Refresh system information
-    system.refresh_disks();
-    system.refresh_memory();
-    system.refresh_cpu();
+    system.refresh_all();
 
     let mut stats = HashMap::new();
 
     // Collect uptime.
-    let uptime = system.uptime() as f32 / 60.0 / 60.0 / 24.0; // Convert from seconds to days.
+    let uptime = System::uptime() as f32 / 60.0 / 60.0 / 24.0; // Convert from seconds to days.
     stats.insert("uptime".to_string(), Value::from(uptime));
 
     // Collect CPU usage.
@@ -122,7 +120,8 @@ pub async fn collect_system_stats(
     stats.insert("swap".to_string(), Value::from(swap_percentile.clamp(0.0, 1.0) * 100.0));
 
     // Collect filesystem usage.
-    for drive in system.disks() {
+    let disks = Disks::new_with_refreshed_list();
+    for drive in &disks {
         if let Some(drive_name) = drive_list.get(drive.mount_point()) {
             let drive_percentile = (drive.total_space() - drive.available_space()) as f64 / drive.total_space() as f64;
             stats.insert(drive_name.clone(), Value::from(drive_percentile.clamp(0.0, 1.0) * 100.0));

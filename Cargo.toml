@@ -1,20 +1,20 @@
 [package]
 name = "system-mqtt"
-authors = ["James Carl"]
-version = "0.3.1"
+authors = ["James Carl", "Wiktor Sikora"]
+version = "0.3.2"
 edition = "2021"
 license = "MIT"
 readme = "README.md"
 description = "Broadcasts system statistics to an mqtt server of your choice. Ideal for home assistant!"
-repository = "https://github.com/IamTheCarl/system-mqtt"
+repository = "https://github.com/wiktorsikora/system-mqtt"
 
 [dependencies]
 argh = "0.1"
 battery = "0.7"
-sysinfo = "0.28.1"
-keyring = "2.0"
+sysinfo = "0.35.0"
+keyring = "3.6.2"
 log = "0.4"
-systemd-journal-logger = "0.7"
+systemd-journal-logger = "2.2.2"
 rumqttc = { version = "0.24.0", features = ["use-rustls", "url"] }
 rpassword = "7.2"
 serde = { version = "1.0", features = ["derive"] }
@@ -23,11 +23,9 @@ serde_yaml = "0.9"
 anyhow = "1.0.69"
 tokio = { version = "1", features = ["full"] }
 url = { version = "2.2", features = ["serde"] }
-users = "0.11.0"
-simple_logger = "4.0.0"
+simple_logger = "5.0.0"
 lm-sensors = "0.3.2"
 futures-util = "0.3.31"
-native-tls = "0.2.14"
 
 [package.metadata.deb]
 systemd-units = { unit-name = "system-mqtt", unit-scripts = "systemd", enable = true }

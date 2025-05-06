@@ -1,30 +1,27 @@
+mod cli;
+mod config;
 mod discovery;
 mod home_assistant;
 mod lm_sensors_impl;
-mod config;
-mod cli;
 mod mqtt;
 mod password;
 mod system_sensors;
 
-use anyhow::{Context, Result};
-use std::{
-    collections::{HashMap},
-    path::{PathBuf},
-    time::Duration,
-};
-use sysinfo::{System, SystemExt};
-use tokio::{signal, time};
-use tokio::task::JoinHandle;
-use tokio::time::Instant;
-use rumqttc::{ConnectionError};
 use crate::cli::{Arguments, SubCommand};
 use crate::config::{load_config, Config};
-use crate::home_assistant::{HomeAssistant};
+use crate::home_assistant::HomeAssistant;
 use crate::lm_sensors_impl::SensorsImpl;
-use crate::mqtt::{setup_mqtt_client, mqtt_loop};
-use crate::password::{set_password as password_set_password};
+use crate::mqtt::{mqtt_loop, setup_mqtt_client};
+use crate::password::set_password as password_set_password;
 use crate::system_sensors::{collect_system_stats, register_system_sensors};
+use anyhow::{Context, Result};
+use rumqttc::ConnectionError;
+use std::{collections::HashMap, path::PathBuf, time::Duration};
+use sysinfo::System;
+use systemd_journal_logger::JournalLog;
+use tokio::task::JoinHandle;
+use tokio::time::Instant;
+use tokio::{signal, time};
 
 #[tokio::main]
 async fn main() {
@@ -39,7 +36,7 @@ async fn main() {
                         .init()
                         .expect("Failed to setup log.");
                 } else {
-                    systemd_journal_logger::init().expect("Failed to setup log.");
+                    JournalLog::new().unwrap().install().unwrap();
                 }
 
                 while let Err(error) = application_trampoline(&config).await {
@@ -61,18 +58,11 @@ async fn main() {
 }
 
 async fn application_trampoline(config: &Config) -> Result<()> {
-    log::info!("Application start.");
-
     let mut system = System::new_all();
 
-    let hostname = system
-        .host_name()
-        .context("Could not get system hostname.")?;
+    let hostname = System::host_name().context("Could not get system hostname.")?;
 
-    let device_id = config
-        .unique_id
-        .clone()
-        .unwrap_or_else(|| hostname);
+    let device_id = config.unique_id.clone().unwrap_or_else(|| hostname);
 
     // Setup MQTT client using the mqtt module
     let (client, eventloop) = setup_mqtt_client(config, &device_id).await?;
@@ -90,8 +80,15 @@ async fn application_trampoline(config: &Config) -> Result<()> {
 
     let mqtt_task = mqtt_loop(eventloop).await;
 
-    let result =
-        availability_trampoline(mqtt_task, &home_assistant, &mut system, config, manager, sensors).await;
+    let result = availability_trampoline(
+        mqtt_task,
+        &home_assistant,
+        &mut system,
+        config,
+        manager,
+        sensors,
+    )
+    .await;
 
     if let Err(error) = home_assistant.set_available(false).await {
         log::error!("Error while disconnecting from home assistant: {:#}", error);
@@ -118,9 +115,7 @@ async fn availability_trampoline(
         .map(|drive_config| (drive_config.path.clone(), drive_config.name.clone()))
         .collect();
 
-    system.refresh_disks();
-    system.refresh_memory();
-    system.refresh_cpu();
+    system.refresh_all();
 
     // Run the main event loop
     run_event_loop(
@@ -130,8 +125,9 @@ async fn availability_trampoline(
         config,
         &manager,
         &mut sensors,
-        &drive_list
-    ).await
+        &drive_list,
+    )
+    .await
 }
 
 /// Run the main event loop for the application
@@ -145,8 +141,10 @@ async fn run_event_loop(
     drive_list: &HashMap<PathBuf, String>,
 ) -> Result<()> {
     let mut discovery_interval = tokio::time::interval_at(
-        Instant::now(), 
-        config.discovery_interval.unwrap_or(Duration::from_secs(60 * 60))
+        Instant::now(),
+        config
+            .discovery_interval
+            .unwrap_or(Duration::from_secs(60 * 60)),
     );
     let mut interval = tokio::time::interval_at(Instant::now(), config.update_interval);
 

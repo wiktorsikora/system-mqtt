@@ -85,20 +85,20 @@ impl SensorsImpl {
         Ok(())
     }
 
-    pub async fn print_sensors(&mut self) -> anyhow::Result<()> {
-        for chip in self.sensors.chip_iter(None) {
-            println!("Chip: {:?}", chip.name());
-            for feature in chip.feature_iter() {
-                println!("  Feature: {:?}", feature.label());
-                for sub_feature in feature.sub_feature_iter() {
-                    println!("    Subfeature: {:?}", sub_feature.name());
-                    println!("      Kind: {:?}", sub_feature.kind());
-                    println!("      Value: {:?}", sub_feature.value());
-                }
-            }
-        }
-        Ok(())
-    }
+    // pub async fn print_sensors(&mut self) -> anyhow::Result<()> {
+    //     for chip in self.sensors.chip_iter(None) {
+    //         println!("Chip: {:?}", chip.name());
+    //         for feature in chip.feature_iter() {
+    //             println!("  Feature: {:?}", feature.label());
+    //             for sub_feature in feature.sub_feature_iter() {
+    //                 println!("    Subfeature: {:?}", sub_feature.name());
+    //                 println!("      Kind: {:?}", sub_feature.kind());
+    //                 println!("      Value: {:?}", sub_feature.value());
+    //             }
+    //         }
+    //     }
+    //     Ok(())
+    // }
 
     pub async fn register_sensors(&mut self, home_assistant: &mut HomeAssistant) -> anyhow::Result<()>{
 
