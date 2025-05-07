@@ -35,7 +35,7 @@ impl NvidiaGpuSensors {
         match gpu_info {
             Ok(gpu_info) => {
                 self.nvidia_smi_available = true;
-                log::info!("NVIDIA GPU info: {:?}", gpu_info);
+                log::debug!("NVIDIA GPU info: {:?}", gpu_info);
             }
             Err(err) => {
                 log::debug!("Failed to get NVIDIA GPU info, nvidia sensors disabled: {err:#}");
