@@ -55,7 +55,7 @@ fn validate_entity_id(entity_id: &str) -> Result<()> {
 
     // Check if entity_id contains only lowercase alphanumeric characters and underscores
     if !entity_id.chars().all(|c| c.is_ascii_alphanumeric() || c == '_' || c == '-') {
-        bail!("Entity ID '{}' contains invalid characters. Only lowercase letters, numbers, underscores, and hyphens are allowed.", entity_id);
+        bail!("Entity ID '{}' contains invalid characters", entity_id);
     }
 
     Ok(())

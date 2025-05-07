@@ -6,6 +6,7 @@ use sysinfo::{System, Disks};
 use crate::config::Config;
 use crate::home_assistant::{EntityRegistrationBuilder, HomeAssistant};
 use crate::lm_sensors_impl::SensorsImpl;
+use crate::nvidia_gpu::NvidiaGpuSensors;
 
 /// Register all system sensors with Home Assistant
 pub async fn register_system_sensors(home_assistant: &mut HomeAssistant, config: &Config) -> Result<()> {
@@ -92,6 +93,7 @@ pub async fn collect_system_stats(
     drive_list: &HashMap<PathBuf, String>,
     manager: &battery::Manager,
     sensors: &mut SensorsImpl,
+    gpu_sensors: &NvidiaGpuSensors,
 ) -> Result<HashMap<String, Value>> {
     // Refresh system information
     system.refresh_all();
@@ -150,6 +152,10 @@ pub async fn collect_system_stats(
 
     // Collect lm_sensors data.
     sensors.collect_values(&mut stats).await?;
+    
+    if let Err(err) = gpu_sensors.collect_values(&mut stats).await {
+        log::warn!("Failed to collect GPU sensor data: {:#}", err);
+    }
 
     Ok(stats)
 }

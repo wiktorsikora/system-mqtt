@@ -3,11 +3,7 @@ use anyhow::Context;
 use lm_sensors::feature::Kind;
 use lm_sensors::{LMSensors, Value};
 use crate::home_assistant::{HomeAssistant, EntityRegistrationBuilder};
-
-/// Sanitize a sensor name by replacing spaces with dashes
-fn sanitize_sensor_name(name: String) -> String {
-    name.replace(" ", "-")
-}
+use crate::utils::sanitize_sensor_name;
 
 pub struct SensorsImpl {
     pub sensors: LMSensors,

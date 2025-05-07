@@ -6,6 +6,8 @@ mod lm_sensors_impl;
 mod mqtt;
 mod password;
 mod system_sensors;
+mod nvidia_gpu;
+mod utils;
 
 use crate::cli::{Arguments, SubCommand};
 use crate::config::{load_config, Config};
@@ -78,6 +80,11 @@ async fn application_trampoline(config: &Config) -> Result<()> {
     let mut sensors = SensorsImpl::new()?;
     sensors.register_sensors(&mut home_assistant).await?;
 
+    let mut gpu_sensors = nvidia_gpu::NvidiaGpuSensors::new();
+    gpu_sensors.init().await?;
+
+    gpu_sensors.register_sensors(&mut home_assistant).await?;
+
     home_assistant.set_available(true).await?;
 
     let mqtt_task = mqtt_loop(eventloop).await;
@@ -86,6 +93,7 @@ async fn application_trampoline(config: &Config) -> Result<()> {
         mqtt_task,
         &home_assistant,
         &mut system,
+        gpu_sensors,
         config,
         manager,
         sensors,
@@ -107,6 +115,7 @@ async fn availability_trampoline(
     mqtt_task: JoinHandle<std::result::Result<(), ConnectionError>>,
     home_assistant: &HomeAssistant,
     system: &mut System,
+    gpu_sensors: nvidia_gpu::NvidiaGpuSensors,
     config: &Config,
     manager: battery::Manager,
     mut sensors: SensorsImpl,
@@ -128,6 +137,7 @@ async fn availability_trampoline(
         &manager,
         &mut sensors,
         &drive_list,
+        gpu_sensors
     )
     .await
 }
@@ -141,6 +151,7 @@ async fn run_event_loop(
     manager: &battery::Manager,
     sensors: &mut SensorsImpl,
     drive_list: &HashMap<PathBuf, String>,
+    gpu_sensors: nvidia_gpu::NvidiaGpuSensors,
 ) -> Result<()> {
     let mut discovery_interval = tokio::time::interval_at(
         Instant::now(),
@@ -177,7 +188,7 @@ async fn run_event_loop(
             }
             _ = interval.tick() => {
                 // Collect system statistics using the stats module
-                let stats = collect_system_stats(system, drive_list, manager, sensors).await?;
+                let stats = collect_system_stats(system, drive_list, manager, sensors, &gpu_sensors).await?;
 
                 // Serialize stats to JSON and publish.
                 let json_message = serde_json::to_string(&stats).context("Failed to serialize stats to JSON.")?;
