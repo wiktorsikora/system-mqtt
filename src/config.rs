@@ -25,20 +25,25 @@ pub async fn load_config(path: &Path) -> anyhow::Result<Config> {
     }
 }
 
+/// Configuration for the System MQTT daemon.
+/// 
+/// This struct contains all the settings needed to run the System MQTT daemon,
+/// including MQTT server connection details, update intervals, and monitored drives.
 #[derive(Serialize, Deserialize, Clone)]
 pub struct Config {
-
     /// The unique ID of the device.
     /// If not specified, the hostname will be used.
+    /// This ID is used to identify the device in Home Assistant and MQTT topics.
     #[serde(default)]
     #[serde(skip_serializing_if = "Option::is_none")]
     pub unique_id: Option<String>,
 
-    /// The URL of the mqtt server.
+    /// The URL of the MQTT server to connect to.
+    /// Format: `mqtt://hostname:port` or `mqtts://hostname:port` for secure connections.
     pub mqtt_server: Url,
 
-    /// Set the username to connect to the mqtt server, if required.
-    /// The password will be fetched from the OS keyring.
+    /// Set the username to connect to the MQTT server, if required.
+    /// The password will be fetched from the OS keyring or other configured source.
     pub username: Option<String>,
 
     /// Where the password for the MQTT server can be found.
@@ -47,15 +52,18 @@ pub struct Config {
     #[serde(default)]
     pub password_source: PasswordSource,
 
-    /// The interval to update at.
+    /// The interval at which system statistics are collected and published.
+    /// This determines how frequently the daemon will report system metrics.
     pub update_interval: Duration,
 
-    /// The interval to send discovery messages at.
+    /// The interval at which Home Assistant discovery messages are sent.
+    /// If not specified, defaults to once per hour.
     #[serde(default)]
     #[serde(skip_serializing_if = "Option::is_none")]
     pub discovery_interval: Option<Duration>,
 
-    /// The names of drives, or the paths to where they are mounted.
+    /// The list of drives to monitor for disk usage.
+    /// Each drive configuration specifies a mount point and a name for reporting.
     pub drives: Vec<DriveConfig>,
 
     /// The path to the CA certificate for the MQTT server.
@@ -87,20 +95,29 @@ impl Default for Config {
     }
 }
 
+/// Configuration for a monitored drive.
 #[derive(Serialize, Deserialize, Clone)]
 pub struct DriveConfig {
+    /// The mount point path of the drive to monitor.
     pub path: PathBuf,
+    /// The name to use when reporting this drive's statistics.
     pub name: String,
 }
 
+/// Source of the MQTT password.
 #[derive(Serialize, Deserialize, Clone)]
 pub enum PasswordSource {
+    /// Use the system keyring to store and retrieve the password.
     #[serde(rename = "keyring")]
     Keyring,
 
+    /// Read the password from a file.
+    /// The file should be readable only by the user running the daemon.
     #[serde(rename = "secret_file")]
     SecretFile(PathBuf),
 
+    /// Use a plaintext password directly in the configuration.
+    /// Note: This is less secure than other options.
     #[serde(rename = "plaintext")]
     Plaintext(String),
 }

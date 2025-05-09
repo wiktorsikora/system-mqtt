@@ -6,7 +6,25 @@ use tokio::task::JoinHandle;
 use crate::config::{Config, PasswordSource};
 use crate::password::KEYRING_SERVICE_NAME;
 
-/// Setup MQTT client with the given configuration
+/// Setup MQTT client with the given configuration.
+/// 
+/// This function creates and configures an MQTT client based on the provided configuration.
+/// It handles:
+/// - Server connection details
+/// - TLS/SSL configuration
+/// - Authentication
+/// - Client ID generation
+/// 
+/// # Arguments
+/// 
+/// * `config` - The configuration containing MQTT server details
+/// * `device_id` - The unique identifier for this device
+/// 
+/// # Returns
+/// 
+/// A tuple containing:
+/// - The configured MQTT client
+/// - The MQTT event loop for handling connection events
 pub async fn setup_mqtt_client(config: &Config, device_id: &str) -> Result<(AsyncClient, rumqttc::EventLoop)> {
     let mut url = config.mqtt_server.clone();
     let client_id = format!("system-mqtt-{}", device_id);
@@ -71,7 +89,21 @@ pub async fn setup_mqtt_client(config: &Config, device_id: &str) -> Result<(Asyn
     Ok((client, eventloop))
 }
 
-/// Run the MQTT event loop in a separate task
+/// Run the MQTT event loop in a separate task.
+/// 
+/// This function spawns a new task that handles MQTT connection events and maintains
+/// the connection to the MQTT broker. It monitors for:
+/// - Connection acknowledgments
+/// - Connection errors
+/// - Other MQTT events
+/// 
+/// # Arguments
+/// 
+/// * `eventloop` - The MQTT event loop to run
+/// 
+/// # Returns
+/// 
+/// A join handle that can be used to monitor the MQTT task's status
 pub async fn mqtt_loop(
     mut eventloop: rumqttc::EventLoop
 ) -> JoinHandle<std::result::Result<(), ConnectionError>> {

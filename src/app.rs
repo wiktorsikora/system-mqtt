@@ -15,6 +15,10 @@ use crate::lm_sensors_impl::SensorsImpl;
 use crate::nvidia_gpu::NvidiaGpuSensors;
 use crate::system_sensors::{collect_system_stats, register_system_sensors};
 
+/// Main application structure that manages the System MQTT daemon.
+/// 
+/// This struct coordinates all the components of the system monitoring daemon,
+/// including system statistics collection, MQTT communication, and sensor management.
 pub struct App {
     config: Config,
     system: System,
@@ -28,6 +32,23 @@ pub struct App {
 }
 
 impl App {
+    /// Create a new instance of the System MQTT daemon.
+    /// 
+    /// This initializes all components including:
+    /// - System monitoring
+    /// - MQTT client
+    /// - Home Assistant integration
+    /// - Hardware sensors
+    /// - Battery monitoring
+    /// 
+    /// # Arguments
+    /// 
+    /// * `config` - The configuration for the daemon
+    /// * `cancel_token` - Token used for graceful shutdown
+    /// 
+    /// # Returns
+    /// 
+    /// A new App instance ready to run, or an error if initialization fails.
     pub async fn new(config: Config, cancel_token: CancellationToken) -> Result<Self> {
         let mut system = System::new_all();
         let hostname = System::host_name().context("Could not get system hostname.")?;
@@ -74,6 +95,22 @@ impl App {
         })
     }
 
+    /// Run the main daemon loop.
+    /// 
+    /// This method runs the main loop that:
+    /// - Collects system statistics at configured intervals
+    /// - Publishes updates to MQTT
+    /// - Sends Home Assistant discovery messages
+    /// - Handles graceful shutdown
+    /// 
+    /// The loop continues until either:
+    /// - The MQTT connection fails
+    /// - A shutdown signal is received
+    /// - An unrecoverable error occurs
+    /// 
+    /// # Returns
+    /// 
+    /// Returns Ok(()) if the daemon shuts down gracefully, or an error if something goes wrong.
     pub async fn run(&mut self) -> Result<()> {
         let mut discovery_interval = time::interval_at(
             Instant::now(),
@@ -118,7 +155,7 @@ impl App {
                     self.home_assistant.publish("state", json_message).await;
                 }
                 _ = self.cancel_token.cancelled() => {
-                    log::info!("Shutdown requested. Exiting...");
+                    log::info!("Shutdown signal received, exiting...");
                     break;
                 }
             }

@@ -3,7 +3,10 @@ use std::collections::HashSet;
 use anyhow::{Context, Result, bail};
 use crate::discovery::{Device, SingleComponentDiscoveryPayload};
 
-/// Builder for entity registration parameters
+/// Builder for entity registration parameters.
+/// 
+/// This builder provides a fluent interface for configuring Home Assistant entity registration.
+/// It allows setting various properties like device class, state class, and units of measurement.
 pub struct EntityRegistrationBuilder<'a> {
     platform: &'a str,
     device_class: Option<&'a str>,
@@ -14,6 +17,12 @@ pub struct EntityRegistrationBuilder<'a> {
 }
 
 impl<'a> EntityRegistrationBuilder<'a> {
+    /// Create a new builder for entity registration.
+    /// 
+    /// # Arguments
+    /// 
+    /// * `platform` - The Home Assistant platform type (e.g., "sensor", "binary_sensor")
+    /// * `entity_id` - The unique identifier for this entity
     pub fn new(platform: &'a str, entity_id: &'a str) -> Self {
         Self {
             platform,
@@ -25,29 +34,45 @@ impl<'a> EntityRegistrationBuilder<'a> {
         }
     }
 
+    /// Set the device class for this entity.
+    /// 
+    /// The device class helps Home Assistant understand the type of data being reported.
+    /// Common values include "temperature", "humidity", "power", etc.
     pub fn device_class(mut self, device_class: &'a str) -> Self {
         self.device_class = Some(device_class);
         self
     }
 
+    /// Set the state class for this entity.
+    /// 
+    /// The state class indicates how the value should be interpreted.
+    /// Common values include "measurement", "total", "total_increasing".
     pub fn state_class(mut self, state_class: &'a str) -> Self {
         self.state_class = Some(state_class);
         self
     }
 
+    /// Set the unit of measurement for this entity.
+    /// 
+    /// This should be a standard unit like "°C", "%", "W", etc.
     pub fn unit_of_measurement(mut self, unit: &'a str) -> Self {
         self.unit_of_measurement = Some(unit);
         self
     }
 
+    /// Set the icon for this entity.
+    /// 
+    /// This should be a Material Design Icons name (e.g., "mdi:thermometer").
     pub fn icon(mut self, icon: &'a str) -> Self {
         self.icon = Some(icon);
         self
     }
 }
 
-/// Validates that an entity ID contains only valid characters
-/// Entity IDs should only contain lowercase alphanumeric characters and underscores
+/// Validates that an entity ID contains only valid characters.
+/// 
+/// Entity IDs should only contain lowercase alphanumeric characters and underscores.
+/// This function ensures the ID follows Home Assistant's naming conventions.
 fn validate_entity_id(entity_id: &str) -> Result<()> {
     if entity_id.is_empty() {
         bail!("Entity ID cannot be empty");
@@ -61,6 +86,10 @@ fn validate_entity_id(entity_id: &str) -> Result<()> {
     Ok(())
 }
 
+/// Main interface for Home Assistant integration.
+/// 
+/// This struct handles the communication with Home Assistant through MQTT,
+/// including entity registration, state updates, and availability reporting.
 pub struct HomeAssistant {
     client: AsyncClient,
     device_id: String,
@@ -69,6 +98,12 @@ pub struct HomeAssistant {
 }
 
 impl HomeAssistant {
+    /// Create a new Home Assistant integration instance.
+    /// 
+    /// # Arguments
+    /// 
+    /// * `device_id` - The unique identifier for this device
+    /// * `client` - The MQTT client to use for communication
     pub fn new(device_id: String, client: AsyncClient) -> Result<Self> {
         let home_assistant = Self {
             client,
@@ -80,6 +115,13 @@ impl HomeAssistant {
         Ok(home_assistant)
     }
 
+    /// Set the availability state of the device.
+    /// 
+    /// This publishes the device's online/offline status to Home Assistant.
+    /// 
+    /// # Arguments
+    /// 
+    /// * `available` - Whether the device is available (true) or unavailable (false)
     pub async fn set_available(&self, available: bool) -> Result<()> {
         let payload = if available { "online" } else { "offline" };
         self.client
@@ -93,7 +135,15 @@ impl HomeAssistant {
             .context("Failed to publish availability topic.")
     }
 
-    /// Register an entity using the builder pattern
+    /// Register an entity using the builder pattern.
+    /// 
+    /// This method registers a new entity with Home Assistant using the provided builder.
+    /// The builder allows configuring various aspects of the entity like its type,
+    /// device class, and units of measurement.
+    /// 
+    /// # Arguments
+    /// 
+    /// * `builder` - The entity registration builder containing the entity configuration
     pub async fn register_entity_with_builder(
         &mut self,
         builder: EntityRegistrationBuilder<'_>,
