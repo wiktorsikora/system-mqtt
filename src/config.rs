@@ -25,7 +25,7 @@ pub async fn load_config(path: &Path) -> anyhow::Result<Config> {
     }
 }
 
-#[derive(Serialize, Deserialize)]
+#[derive(Serialize, Deserialize, Clone)]
 pub struct Config {
 
     /// The unique ID of the device.
@@ -87,13 +87,13 @@ impl Default for Config {
     }
 }
 
-#[derive(Serialize, Deserialize)]
+#[derive(Serialize, Deserialize, Clone)]
 pub struct DriveConfig {
     pub path: PathBuf,
     pub name: String,
 }
 
-#[derive(Serialize, Deserialize)]
+#[derive(Serialize, Deserialize, Clone)]
 pub enum PasswordSource {
     #[serde(rename = "keyring")]
     Keyring,

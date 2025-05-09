@@ -1,3 +1,4 @@
+mod app;
 mod cli;
 mod config;
 mod discovery;
@@ -10,194 +11,89 @@ mod nvidia_gpu;
 mod utils;
 
 use crate::cli::{Arguments, SubCommand};
-use crate::config::{load_config, Config};
-use crate::home_assistant::HomeAssistant;
-use crate::lm_sensors_impl::SensorsImpl;
-use crate::mqtt::{mqtt_loop, setup_mqtt_client};
-use crate::password::set_password as password_set_password;
-use crate::system_sensors::{collect_system_stats, register_system_sensors};
-use anyhow::{Context, Result};
-use rumqttc::ConnectionError;
-use std::{collections::HashMap, path::PathBuf, time::Duration};
-use log::LevelFilter;
-use sysinfo::System;
+use crate::config::load_config;
+use anyhow::Result;
+use log::Level;
 use systemd_journal_logger::JournalLog;
-use tokio::task::JoinHandle;
-use tokio::time::Instant;
-use tokio::{signal, time};
+use std::time::Duration;
+use tokio::time;
+use tokio::signal;
+use tokio_util::sync::CancellationToken;
 
 #[tokio::main]
-async fn main() {
-    let arguments: Arguments = argh::from_env();
+async fn main() -> Result<()> {
+    let args: Arguments = argh::from_env();
 
-    match load_config(&arguments.config_file).await {
-        Ok(config) => match arguments.command {
-            SubCommand::Run(arguments) => {
-                if arguments.log_to_stderr {
-                    simple_logger::SimpleLogger::new()
-                        .env()
-                        .init()
-                        .expect("Failed to setup log.");
-                } else {
-                    let log = JournalLog::new().unwrap();
-                    log.install().unwrap()
+    match args.command {
+        SubCommand::Run(run_args) => {
+            // Setup logging
+            if run_args.log_to_stderr {
+                simple_logger::init_with_level(Level::Info)?;
+            } else {
+                JournalLog::new()?.install()?;
+            }
+
+            let config = load_config(&args.config_file).await?;
+            let cancel_token = CancellationToken::new();
+            let cancel_token_clone = cancel_token.clone();
+            
+            // Spawn a task to handle Ctrl+C
+            tokio::spawn(async move {
+                if let Ok(()) = signal::ctrl_c().await {
+                    log::info!("Terminate signal received. Initiating graceful shutdown...");
+                    cancel_token_clone.cancel();
                 }
-                log::set_max_level(LevelFilter::Info);
-                while let Err(error) = application_trampoline(&config).await {
-                    log::error!("Fatal error: {error:#}");
-                    log::error!("Restarting in 60 seconds...");
-                    time::sleep(Duration::from_secs(60)).await;
+            });
+            
+            // Retry loop with 60-second delay
+            loop {
+                // Check if cancellation was requested
+                if cancel_token.is_cancelled() {
+                    log::info!("Shutdown requested. Exiting...");
+                    return Ok(());
+                }
+
+                match app::App::new(config.clone(), cancel_token.clone()).await {
+                    Ok(mut app) => {
+                        if let Err(error) = app.run().await {
+                            log::error!("Fatal error: {error:#}");
+                            log::error!("Restarting in 60 seconds...");
+                            
+                            // Wait for either 60 seconds or cancellation
+                            tokio::select! {
+                                _ = time::sleep(Duration::from_secs(60)) => {
+                                    // Continue with restart
+                                }
+                                _ = cancel_token.cancelled() => {
+                                    log::info!("Shutdown requested during restart delay. Exiting...");
+                                    return Ok(());
+                                }
+                            }
+                        } else {
+                            break;
+                        }
+                    }
+                    Err(error) => {
+                        log::error!("Failed to initialize application: {error:#}");
+                        log::error!("Restarting in 60 seconds...");
+                        
+                        // Wait for either 60 seconds or cancellation
+                        tokio::select! {
+                            _ = time::sleep(Duration::from_secs(60)) => {
+                                // Continue with restart
+                            }
+                            _ = cancel_token.cancelled() => {
+                                log::info!("Shutdown requested during restart delay. Exiting...");
+                                return Ok(());
+                            }
+                        }
+                    }
                 }
             }
-            SubCommand::SetPassword(_arguments) => {
-                if let Err(error) = password_set_password(config).await {
-                    eprintln!("Fatal error: {}", error);
-                }
-            }
-        },
-        Err(error) => {
-            eprintln!("Failed to load config file: {}", error);
         }
-    }
-}
-
-async fn application_trampoline(config: &Config) -> Result<()> {
-    let mut system = System::new_all();
-
-    let hostname = System::host_name().context("Could not get system hostname.")?;
-
-    let device_id = config.unique_id.clone().unwrap_or_else(|| hostname);
-
-    // Setup MQTT client using the mqtt module
-    let (client, eventloop) = setup_mqtt_client(config, &device_id).await?;
-    let manager = battery::Manager::new().context("Failed to initialize battery monitoring.")?;
-
-    let mut home_assistant = HomeAssistant::new(device_id, client)?;
-
-    // Register system sensors
-    register_system_sensors(&mut home_assistant, config).await?;
-
-    let mut sensors = SensorsImpl::new()?;
-    sensors.register_sensors(&mut home_assistant).await?;
-
-    let mut gpu_sensors = nvidia_gpu::NvidiaGpuSensors::new();
-    gpu_sensors.init().await?;
-
-    gpu_sensors.register_sensors(&mut home_assistant).await?;
-
-    home_assistant.set_available(true).await?;
-
-    let mqtt_task = mqtt_loop(eventloop).await;
-
-    let result = availability_trampoline(
-        mqtt_task,
-        &home_assistant,
-        &mut system,
-        gpu_sensors,
-        config,
-        manager,
-        sensors,
-    )
-    .await;
-
-    if let Err(error) = home_assistant.set_available(false).await {
-        log::error!("Error while disconnecting from home assistant: {:#}", error);
-    }
-
-    result?;
-
-    home_assistant.disconnect().await?;
-
-    Ok(())
-}
-
-async fn availability_trampoline(
-    mqtt_task: JoinHandle<std::result::Result<(), ConnectionError>>,
-    home_assistant: &HomeAssistant,
-    system: &mut System,
-    gpu_sensors: nvidia_gpu::NvidiaGpuSensors,
-    config: &Config,
-    manager: battery::Manager,
-    mut sensors: SensorsImpl,
-) -> Result<()> {
-    let drive_list: HashMap<PathBuf, String> = config
-        .drives
-        .iter()
-        .map(|drive_config| (drive_config.path.clone(), drive_config.name.clone()))
-        .collect();
-
-    system.refresh_all();
-
-    // Run the main event loop
-    run_event_loop(
-        mqtt_task,
-        home_assistant,
-        system,
-        config,
-        &manager,
-        &mut sensors,
-        &drive_list,
-        gpu_sensors
-    )
-    .await
-}
-
-/// Run the main event loop for the application
-async fn run_event_loop(
-    mqtt_task: JoinHandle<std::result::Result<(), ConnectionError>>,
-    home_assistant: &HomeAssistant,
-    system: &mut System,
-    config: &Config,
-    manager: &battery::Manager,
-    sensors: &mut SensorsImpl,
-    drive_list: &HashMap<PathBuf, String>,
-    gpu_sensors: nvidia_gpu::NvidiaGpuSensors,
-) -> Result<()> {
-    let mut discovery_interval = tokio::time::interval_at(
-        Instant::now(),
-        config
-            .discovery_interval
-            .unwrap_or(Duration::from_secs(60 * 60)),
-    );
-    let mut interval = tokio::time::interval_at(Instant::now(), config.update_interval);
-
-    // create fused mqtt_task
-    use futures_util::future::FutureExt;
-    let mut mqtt_fut = mqtt_task.fuse();
-
-    loop {
-        tokio::select! {
-            result = &mut mqtt_fut => {
-                match result {
-                    Ok(Ok(_)) => {
-                        log::info!("MQTT task completed successfully, exiting.");
-                        break;
-                    }
-                    Ok(Err(e)) => {
-                        log::error!("MQTT task failed: {:#}", e);
-                        return Err(e).context("MQTT task failed.");
-                    }
-                    Err(e) => {
-                        log::error!("MQTT task failed: {:#}", e);
-                        return Err(e).context("MQTT task failed.");
-                    }
-                }
-            }
-            _ = discovery_interval.tick() => {
-                home_assistant.publish_discovery().await?
-            }
-            _ = interval.tick() => {
-                // Collect system statistics using the stats module
-                let stats = collect_system_stats(system, drive_list, manager, sensors, &gpu_sensors).await?;
-
-                // Serialize stats to JSON and publish.
-                let json_message = serde_json::to_string(&stats).context("Failed to serialize stats to JSON.")?;
-                home_assistant.publish("state", json_message).await;
-            }
-            _ = signal::ctrl_c() => {
-                log::info!("Terminate signal has been received.");
-                break;
-            }
+        SubCommand::SetPassword(_) => {
+            let config = load_config(&args.config_file).await?;
+            crate::password::set_password(config).await?;
         }
     }
 

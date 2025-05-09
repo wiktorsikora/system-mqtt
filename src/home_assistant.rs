@@ -157,7 +157,7 @@ impl HomeAssistant {
         }
     }
 
-    pub async fn disconnect(self) -> Result<()> {
+    pub async fn disconnect(&self) -> Result<()> {
         self.set_available(false).await?;
         Ok(())
     }
