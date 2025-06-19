@@ -18,15 +18,16 @@ RUN cargo build --release
 FROM debian:bullseye-slim
 
 # Install runtime dependencies
-RUN apt-get update && apt-get install -y libdbus-1-3 libsensors5 && \
-    rm -rf /var/lib/apt/lists/*
+RUN apt-get update && apt-get install -y \
+    libdbus-1-3 \
+    libsensors5 \
+    && rm -rf /var/lib/apt/lists/* \
 
 # Copy the compiled binary from the builder stage
 COPY --from=builder /usr/src/system-mqtt/target/release/system-mqtt /usr/bin/system-mqtt
 
 # Set the working directory
 WORKDIR /app
-# Copy the configuration file
 
 # Expose the configuration file path
 VOLUME ["/etc/system-mqtt.yaml"]

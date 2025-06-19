@@ -1,6 +1,7 @@
 services:
   system-mqtt:
-    image: system-mqtt:latest
+#    image: system-mqtt:latest
+    image: system-mqtt:gpu-latest
     container_name: system-mqtt
     volumes:
       - ./config/:/app/config/
@@ -9,3 +10,10 @@ services:
     restart: unless-stopped
     privileged: true
     stop_signal: SIGINT
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: 1
+              capabilities: [ gpu ]
